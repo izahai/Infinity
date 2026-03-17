@@ -143,16 +143,25 @@ class Infinity(nn.Module):
         self.checkpointing = checkpointing
         self.pad_to_multiplier = max(1, pad_to_multiplier)
         
-        customized_kernel_installed = any('Infinity' in arg_name for arg_name in flash_attn_func.__code__.co_varnames)
+        customized_kernel_installed = (
+            callable(flash_attn_func) and
+            any('Infinity' in arg_name for arg_name in flash_attn_func.__code__.co_varnames)
+        )
         self.customized_flash_attn = customized_flash_attn and customized_kernel_installed
         if customized_flash_attn and not customized_kernel_installed:
             import inspect, warnings
-            file_path = inspect.getsourcefile(flash_attn_func)
-            line_number = inspect.getsourcelines(flash_attn_func)[1]
+            if callable(flash_attn_func):
+                file_path = inspect.getsourcefile(flash_attn_func)
+                line_number = inspect.getsourcelines(flash_attn_func)[1]
+                varnames = flash_attn_func.__code__.co_varnames
+            else:
+                file_path = 'flash_attn package not installed'
+                line_number = -1
+                varnames = ()
             info = (
                 f'>>>>>> Customized FlashAttention2 is not installed or compiled, but specified in args by --flash=1. Set customized_flash_attn = False. <<<<<<\n'
                 f'>>>>>> `flash_attn_func` is in [line {line_number}] [file {file_path}] <<<<<<\n'
-                f'>>>>>> {flash_attn_func.__code__.co_varnames=} <<<<<<\n'
+                f'>>>>>> flash_attn_func.__code__.co_varnames={varnames} <<<<<<\n'
             )
             warnings.warn(info, ImportWarning)
             print(info, flush=True)

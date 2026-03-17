@@ -3,7 +3,8 @@ FROM pytorch/pytorch:2.5.1-cuda11.8-cudnn9-devel
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     CUDA_HOME=/usr/local/cuda \
-    PATH="$CUDA_HOME/bin:$PATH"
+    PATH="$CUDA_HOME/bin:$PATH" \
+    INSTALL_FLASH_ATTN=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
@@ -19,7 +20,7 @@ COPY requirements.txt /workspace/requirements.txt
 
 RUN pip install --upgrade pip \
     && pip install ninja \
-    && MAX_JOBS=1 pip install flash-attn --no-build-isolation \
+    && if [ "$INSTALL_FLASH_ATTN" = "1" ]; then MAX_JOBS=1 pip install flash-attn --no-build-isolation; else echo "Skip flash-attn install (INSTALL_FLASH_ATTN=$INSTALL_FLASH_ATTN)"; fi \
     && pip install -r requirements.txt \
     && pip install opencv-fixer==0.2.5 \
     && python -c "from opencv_fixer import AutoFix; AutoFix()"

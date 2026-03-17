@@ -13,10 +13,17 @@ import torch.nn.functional as F
 import numpy as np
 from timm.models.layers import DropPath, drop_path
 from torch.utils.checkpoint import checkpoint
+import warnings
 
 # Import flash_attn's attention
-from flash_attn import flash_attn_func                  # q, k, or v: BLHc, ret: BLHc
-from flash_attn import flash_attn_varlen_kvpacked_func  # qkv: N3Hc, ret: NHc
+try:
+    from flash_attn import flash_attn_func                  # q, k, or v: BLHc, ret: BLHc
+    from flash_attn import flash_attn_varlen_kvpacked_func  # qkv: N3Hc, ret: NHc
+    flash_attn_installed = True
+except ImportError:
+    flash_attn_func = None
+    flash_attn_varlen_kvpacked_func = None
+    flash_attn_installed = False
 
 from torch.nn.functional import scaled_dot_product_attention as slow_attn    # q, k, v: BHLc
 
@@ -208,7 +215,8 @@ class SelfAttention(nn.Module):
         """
         super().__init__()
         assert embed_dim % num_heads == 0
-        self.using_flash = customized_flash_attn
+        self.using_flash = customized_flash_attn and flash_attn_func is not None
+        self._warned_flash_fallback = False
         
         self.num_heads, self.head_dim = num_heads, embed_dim // num_heads
         self.tau, self.cos_attn = tau, cos_attn
@@ -298,7 +306,22 @@ class SelfAttention(nn.Module):
                 kw = dict(VAR_visible_kvlen=attn_bias_or_two_vector[0], VAR_invisible_qlen=attn_bias_or_two_vector[1])
             else:                                   # inference (autoregressive sampling)
                 kw = dict()
-            oup = flash_attn_func(q.to(v.dtype), k.to(v.dtype), v, dropout_p=0, softmax_scale=self.scale, **kw).view(B, L, C)
+            try:
+                oup = flash_attn_func(q.to(v.dtype), k.to(v.dtype), v, dropout_p=0, softmax_scale=self.scale, **kw).view(B, L, C)
+            except RuntimeError as err:
+                # Typical on pre-Ampere GPUs (e.g., Tesla T4) when flash-attn is installed but unsupported.
+                if not self._warned_flash_fallback:
+                    warnings.warn(
+                        f'FlashAttention unavailable at runtime, falling back to PyTorch attention for SelfAttention. '
+                        f'Error: {err}',
+                        RuntimeWarning
+                    )
+                    self._warned_flash_fallback = True
+                self.using_flash = False
+                q = q.permute(0, 2, 1, 3).contiguous()
+                k = k.permute(0, 2, 1, 3).contiguous()
+                v = v.permute(0, 2, 1, 3).contiguous()
+                oup = slow_attn(query=q, key=k, value=v, scale=self.scale, attn_mask=None, dropout_p=0).transpose(1, 2).reshape(B, L, C)
         else:
             # if self.cos_attn: q, k are in fp32; v is in bf16
             # else: q, k, v are in bf16
@@ -330,6 +353,8 @@ class CrossAttention(nn.Module):
         """
         cos_attn = False    # TODO: never use cos attn in cross attention with T5 kv
         super().__init__()
+        self.use_flash_varlen = flash_attn_varlen_kvpacked_func is not None
+        self._warned_flash_varlen_fallback = False
         self.for_attn_pool = for_attn_pool
         self.embed_dim = embed_dim
         self.kv_dim = kv_dim
@@ -355,6 +380,19 @@ class CrossAttention(nn.Module):
         
         self.proj = nn.Linear(embed_dim, embed_dim)
         self.proj_drop = get_dropout_layer(proj_drop)
+
+    def _slow_varlen_attention(self, q_compact, kv_compact, cu_seqlens_k, B, Lq):
+        """Fallback path for GPUs/kernels where flash-attn varlen is unavailable."""
+        out = []
+        for b in range(B):
+            k_start = int(cu_seqlens_k[b].item())
+            k_end = int(cu_seqlens_k[b + 1].item())
+            q_i = q_compact[b * Lq:(b + 1) * Lq].permute(1, 0, 2).unsqueeze(0).contiguous()  # 1HLc
+            k_i = kv_compact[k_start:k_end, 0].permute(1, 0, 2).unsqueeze(0).contiguous()     # 1HLc
+            v_i = kv_compact[k_start:k_end, 1].permute(1, 0, 2).unsqueeze(0).contiguous()     # 1HLc
+            out_i = slow_attn(query=q_i, key=k_i.to(q_i.dtype), value=v_i.to(q_i.dtype), scale=self.scale, attn_mask=None, dropout_p=0)
+            out.append(out_i.squeeze(0).permute(1, 0, 2).contiguous())  # LqHc
+        return torch.cat(out, dim=0)
     
     def forward(self, q, ca_kv):
         """
@@ -392,11 +430,25 @@ class CrossAttention(nn.Module):
         kv_compact = kv_compact.contiguous()
         
         cu_seqlens_q = torch.arange(0, Lq * (B+1), Lq, dtype=torch.int32, device=q_compact.device)
-        if q_compact.dtype == torch.float32:    # todo: fp16 or bf16?
-            oup = flash_attn_varlen_kvpacked_func(q=q_compact.to(dtype=torch.bfloat16), kv=kv_compact.to(dtype=torch.bfloat16), cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k, max_seqlen_q=Lq, max_seqlen_k=max_seqlen_k, dropout_p=0, softmax_scale=self.scale).reshape(B, Lq, -1)
-            oup = oup.float()
+        if self.use_flash_varlen:
+            try:
+                if q_compact.dtype == torch.float32:    # todo: fp16 or bf16?
+                    oup = flash_attn_varlen_kvpacked_func(q=q_compact.to(dtype=torch.bfloat16), kv=kv_compact.to(dtype=torch.bfloat16), cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k, max_seqlen_q=Lq, max_seqlen_k=max_seqlen_k, dropout_p=0, softmax_scale=self.scale).reshape(B, Lq, -1)
+                    oup = oup.float()
+                else:
+                    oup = flash_attn_varlen_kvpacked_func(q=q_compact, kv=kv_compact, cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k, max_seqlen_q=Lq, max_seqlen_k=max_seqlen_k, dropout_p=0, softmax_scale=self.scale).reshape(B, Lq, -1)
+            except RuntimeError as err:
+                if not self._warned_flash_varlen_fallback:
+                    warnings.warn(
+                        f'FlashAttention varlen unavailable at runtime, falling back to PyTorch attention for CrossAttention. '
+                        f'Error: {err}',
+                        RuntimeWarning
+                    )
+                    self._warned_flash_varlen_fallback = True
+                self.use_flash_varlen = False
+                oup = self._slow_varlen_attention(q_compact=q_compact, kv_compact=kv_compact, cu_seqlens_k=cu_seqlens_k, B=B, Lq=Lq).reshape(B, Lq, -1)
         else:
-            oup = flash_attn_varlen_kvpacked_func(q=q_compact, kv=kv_compact, cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k, max_seqlen_q=Lq, max_seqlen_k=max_seqlen_k, dropout_p=0, softmax_scale=self.scale).reshape(B, Lq, -1)
+            oup = self._slow_varlen_attention(q_compact=q_compact, kv_compact=kv_compact, cu_seqlens_k=cu_seqlens_k, B=B, Lq=Lq).reshape(B, Lq, -1)
         
         return self.proj_drop(self.proj(oup))
     
