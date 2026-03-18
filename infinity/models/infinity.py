@@ -521,12 +521,12 @@ class Infinity(nn.Module):
         idx_Bl_list, idx_Bld_list = [], []
 
         if inference_mode:
-            for b in self.unregistered_blocks: (b.sa if isinstance(b, CrossAttnBlock) else b.attn).kv_caching(True)
+            for b in self.unregistered_blocks: (b.sa if isinstance(b, CrossAttnBlock) else b.attn).kv_caching(False)
         else:
             assert self.num_block_chunks > 1
             for block_chunk_ in self.block_chunks:
                 for module in block_chunk_.module.module:
-                    (module.sa if isinstance(module, CrossAttnBlock) else module.attn).kv_caching(True)
+                    (module.sa if isinstance(module, CrossAttnBlock) else module.attn).kv_caching(False)
         
         abs_cfg_insertion_layers = []
         add_cfg_on_logits, add_cfg_on_probs = False, False
