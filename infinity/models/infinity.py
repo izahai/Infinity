@@ -607,11 +607,11 @@ class Infinity(nn.Module):
                     last_stage = m(x=last_stage, cond_BD=cond_BD_or_gss, ca_kv=ca_kv, attn_bias_or_two_vector=None, attn_fn=attn_fn, scale_schedule=scale_schedule, rope2d_freqs_grid=self.rope2d_freqs_grid, scale_ind=si)
                     if (cfg != 1) and (layer_idx in abs_cfg_insertion_layers):
                         #print(f'add cfg={cfg} on {layer_idx}-th layer output')
-                        # if use_minus_cfg:
-                        #     last_stage = cfg * last_stage[:B] - (1-cfg) * last_stage[B:]
-                        # else:
-                        #     last_stage = cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
-                        last_stage = cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
+                        if use_minus_cfg:
+                            last_stage = cfg * last_stage[:B] - (1-cfg) * last_stage[B:]
+                        else:
+                            last_stage = cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
+                        # last_stage = cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
                         last_stage = torch.cat((last_stage, last_stage), 0)
                     layer_idx += 1
             
