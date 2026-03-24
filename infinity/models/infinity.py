@@ -548,7 +548,7 @@ class Infinity(nn.Module):
         kv_compact = self.text_proj_for_ca(kv_compact) # kv_compact shape: [304, 4096]
         ca_kv = kv_compact, cu_seqlens_k, max_seqlen_k
         last_stage = sos.unsqueeze(1).expand(bs, 1, -1) + self.pos_start.expand(bs, 1, -1)
-        last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
+        # last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
 
         with torch.amp.autocast('cuda', enabled=False):
             cond_BD_or_gss = self.shared_ada_lin(cond_BD.float()).float().contiguous()
