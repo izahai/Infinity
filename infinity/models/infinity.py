@@ -607,21 +607,21 @@ class Infinity(nn.Module):
                     last_stage = m(x=last_stage, cond_BD=cond_BD_or_gss, ca_kv=ca_kv, attn_bias_or_two_vector=None, attn_fn=attn_fn, scale_schedule=scale_schedule, rope2d_freqs_grid=self.rope2d_freqs_grid, scale_ind=si)
                     if (cfg != 1) and (layer_idx in abs_cfg_insertion_layers):
                         #print(f'add cfg={cfg} on {layer_idx}-th layer output')
-                        if use_minus_cfg:
-                            last_stage = cfg * last_stage[:B] - (1-cfg) * last_stage[B:]
-                        else:
-                            last_stage = cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
+                        # if use_minus_cfg:
+                        #     last_stage = cfg * last_stage[:B] - (1-cfg) * last_stage[B:]
+                        # else:
+                        last_stage = cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
                         last_stage = torch.cat((last_stage, last_stage), 0)
                     layer_idx += 1
             
             if (cfg != 1) and add_cfg_on_logits:
                 # print(f'add cfg on add_cfg_on_logits')
                 logits_BlV = self.get_logits(last_stage, cond_BD).mul(1/tau_list[si])
-                # if use_minus_cfg:
-                #     logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
-                # else:
-                #     logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
-                logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
+                if use_minus_cfg:
+                    logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
+                else:
+                    logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
+                # logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
             else:
                 logits_BlV = self.get_logits(last_stage[:B], cond_BD[:B]).mul(1/tau_list[si])
             
