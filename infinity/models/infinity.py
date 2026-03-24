@@ -547,8 +547,20 @@ class Infinity(nn.Module):
         sos = cond_BD = self.text_proj_for_sos((kv_compact, cu_seqlens_k, max_seqlen_k)) # sos shape: [2, 4096]
         kv_compact = self.text_proj_for_ca(kv_compact) # kv_compact shape: [304, 4096]
         ca_kv = kv_compact, cu_seqlens_k, max_seqlen_k
-        last_stage = sos.unsqueeze(1).expand(bs, 1, -1) + self.pos_start.expand(bs, 1, -1)
-        # last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
+        
+        # --- Pooling uncond text embedding ---
+        uncond_len = max_seqlen_k
+        uncond_kv = self.text_norm(self.cfg_uncond[:uncond_len]).unsqueeze(0).expand(bs, -1, -1).reshape(bs * uncond_len, -1).contiguous()
+        uncond_cu_seqlens_k = torch.arange(0, (bs + 1) * uncond_len, step=uncond_len, dtype=torch.int32, device=kv_compact.device)
+        cfg_uncond_sos = self.text_proj_for_sos((uncond_kv, uncond_cu_seqlens_k, uncond_len))
+        # --- Pooling uncond text embedding ---
+        
+        last_stage = (
+            sos.unsqueeze(1).expand(bs, 1, -1)
+            + self.pos_start.expand(bs, 1, -1)
+            + cfg_uncond_sos.unsqueeze(1)
+        )
+        last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
 
         with torch.amp.autocast('cuda', enabled=False):
             cond_BD_or_gss = self.shared_ada_lin(cond_BD.float()).float().contiguous()
