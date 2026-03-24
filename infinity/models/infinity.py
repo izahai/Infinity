@@ -3,6 +3,7 @@ Definition of Infinity transformer model.
 """
 
 import math
+import os
 import random
 import time
 from contextlib import nullcontext
@@ -483,6 +484,35 @@ class Infinity(nn.Module):
         assert len(cfg_list) >= len(scale_schedule)
         assert len(tau_list) >= len(scale_schedule)
 
+        def _to_uint8_img(img_tensor: torch.Tensor) -> torch.Tensor:
+            # expect BCHW in [-1, 1], convert to BHWC uint8 in RGB order
+            img_tensor = (img_tensor + 1) / 2
+            return img_tensor.permute(0, 2, 3, 1).mul_(255).clamp_(0, 255).to(torch.uint8).flip(dims=(3,))
+
+        save_scales = save_img_path is not None
+        if save_scales:
+            save_img_path = os.path.expanduser(save_img_path)
+            root, ext = os.path.splitext(save_img_path)
+            save_as_dir = (ext == "") or os.path.isdir(save_img_path) or save_img_path.endswith(os.sep)
+            if save_as_dir:
+                save_dir = save_img_path
+                save_prefix = "pred"
+                save_ext = ".png"
+            else:
+                save_dir = os.path.dirname(save_img_path) or "."
+                save_prefix = os.path.basename(root)
+                save_ext = ext
+            os.makedirs(save_dir, exist_ok=True)
+
+            def _save_scale_img(img_tensor: torch.Tensor, si: int, pn: Tuple[int]) -> None:
+                img_uint8 = _to_uint8_img(img_tensor).cpu().numpy()
+                for bi in range(B):
+                    if save_as_dir:
+                        name = f"scale{si:02d}_{pn[0]}x{pn[1]}x{pn[2]}_b{bi:02d}{save_ext}"
+                    else:
+                        name = f"{save_prefix}_scale{si:02d}_{pn[0]}x{pn[1]}x{pn[2]}_b{bi:02d}{save_ext}"
+                    Image.fromarray(img_uint8[bi]).save(os.path.join(save_dir, name))
+
         # scale_schedule is used by infinity, vae_scale_schedule is used by vae if there exists a spatial patchify, 
         # we need to convert scale_schedule to vae_scale_schedule by multiply 2 to h and w
         if self.apply_spatial_patchify:
@@ -518,15 +548,16 @@ class Infinity(nn.Module):
         with torch.amp.autocast('cuda', enabled=False):
             cond_BD_or_gss = self.shared_ada_lin(cond_BD.float()).float().contiguous()
         accu_BChw, cur_L, ret = None, 0, []  # current length, list of reconstructed images
+        ms_h_BChw = []
         idx_Bl_list, idx_Bld_list = [], []
 
         if inference_mode:
-            for b in self.unregistered_blocks: (b.sa if isinstance(b, CrossAttnBlock) else b.attn).kv_caching(False)
+            for b in self.unregistered_blocks: (b.sa if isinstance(b, CrossAttnBlock) else b.attn).kv_caching(True)
         else:
             assert self.num_block_chunks > 1
             for block_chunk_ in self.block_chunks:
                 for module in block_chunk_.module.module:
-                    (module.sa if isinstance(module, CrossAttnBlock) else module.attn).kv_caching(False)
+                    (module.sa if isinstance(module, CrossAttnBlock) else module.attn).kv_caching(True)
         
         abs_cfg_insertion_layers = []
         add_cfg_on_logits, add_cfg_on_probs = False, False
@@ -614,6 +645,9 @@ class Infinity(nn.Module):
                     last_stage = torch.permute(last_stage, [0,2,1]) # [B, h*w, d] or [B, h*w, 4d]
                 else:
                     summed_codes += codes
+                if save_scales:
+                    cur_img = vae.decode(summed_codes.squeeze(-3))
+                    _save_scale_img(cur_img, si, pn)
             else:
                 if si < gt_leak:
                     idx_Bl = gt_ls_Bl[si]
@@ -622,7 +656,11 @@ class Infinity(nn.Module):
                 # h_BChw = h_BChw.float().transpose_(1, 2).reshape(B, self.d_vae, scale_schedule[si][0], scale_schedule[si][1])
                 h_BChw = h_BChw.transpose_(1, 2).reshape(B, self.d_vae, scale_schedule[si][0], scale_schedule[si][1], scale_schedule[si][2])
                 ret.append(h_BChw if returns_vemb != 0 else idx_Bl)
+                ms_h_BChw.append(h_BChw)
                 idx_Bl_list.append(idx_Bl)
+                if save_scales:
+                    cur_img = vae.viz_from_ms_h_BChw(ms_h_BChw, scale_schedule=scale_schedule[:si+1], same_shape=True, last_one=True)
+                    _save_scale_img(cur_img, si, pn)
                 if si != num_stages_minus_1:
                     accu_BChw, last_stage = self.quant_only_used_in_inference[0].one_step_fuse(si, num_stages_minus_1+1, accu_BChw, h_BChw, scale_schedule)
             
@@ -644,7 +682,7 @@ class Infinity(nn.Module):
         if vae_type != 0:
             img = vae.decode(summed_codes.squeeze(-3))
         else:
-            img = vae.viz_from_ms_h_BChw(ret, scale_schedule=scale_schedule, same_shape=True, last_one=True)
+            img = vae.viz_from_ms_h_BChw(ms_h_BChw, scale_schedule=scale_schedule, same_shape=True, last_one=True)
 
         img = (img + 1) / 2
         img = img.permute(0, 2, 3, 1).mul_(255).to(torch.uint8).flip(dims=(3,))

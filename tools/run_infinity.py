@@ -97,6 +97,7 @@ def gen_one_img(
     g_seed=None,
     sampling_per_bits=1,
     enable_positive_prompt=0,
+    save_img_path=None,
 ):
     sstt = time.time()
     if not isinstance(cfg_list, list):

@@ -369,7 +369,7 @@ class CrossAttention(nn.Module):
             self.scale = 1 / math.sqrt(self.head_dim)
         
         if for_attn_pool:
-            q = torch.empty(1, self.num_heads, self.head_dim)
+            q = torch.empty(1, self.num_heads, self.head_dim) # learnable q for text attn pool
             nn.init.trunc_normal_(q, mean=0, std=math.sqrt(1 / embed_dim / 3))
             self.mat_q = nn.Parameter(q)
         else:
