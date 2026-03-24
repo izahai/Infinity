@@ -98,6 +98,7 @@ def gen_one_img(
     sampling_per_bits=1,
     enable_positive_prompt=0,
     save_img_path=None,
+    inverse_step=0,
 ):
     sstt = time.time()
     if not isinstance(cfg_list, list):
@@ -124,7 +125,8 @@ def gen_one_img(
             ret_img=True, trunk_scale=1000,
             gt_leak=gt_leak, gt_ls_Bl=gt_ls_Bl, inference_mode=True,
             sampling_per_bits=sampling_per_bits,
-            save_img_path=save_img_path
+            save_img_path=save_img_path,
+            inverse_step=inverse_step,
         )
     print(f"cost: {time.time() - sstt}, infinity cost={time.time() - stt}")
     img = img_list[0]

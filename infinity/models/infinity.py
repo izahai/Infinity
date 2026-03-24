@@ -478,6 +478,7 @@ class Infinity(nn.Module):
         inference_mode=False,
         save_img_path=None,
         sampling_per_bits=1,
+        inverse_step=0,
     ):   # returns List[idx_Bl]
         if g_seed is None: rng = None
         else: self.rng.manual_seed(g_seed); rng = self.rng
@@ -582,7 +583,7 @@ class Infinity(nn.Module):
             cfg = cfg_list[si]
             if si >= trunk_scale:
                 break
-            use_minus_cfg = si >= max(0, len(scale_schedule) - 0)
+            use_minus_cfg = si >= max(0, len(scale_schedule) - inverse_step)
             cur_L += np.array(pn).prod()
 
             need_to_pad = 0
