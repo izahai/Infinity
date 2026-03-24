@@ -583,7 +583,7 @@ class Infinity(nn.Module):
             cfg = cfg_list[si]
             if si >= trunk_scale:
                 break
-            use_minus_cfg = si >= max(0, len(scale_schedule) - inverse_step)
+            use_minus_cfg = (si >= max(0, len(scale_schedule) - inverse_step))
             cur_L += np.array(pn).prod()
 
             need_to_pad = 0
@@ -617,10 +617,11 @@ class Infinity(nn.Module):
             if (cfg != 1) and add_cfg_on_logits:
                 # print(f'add cfg on add_cfg_on_logits')
                 logits_BlV = self.get_logits(last_stage, cond_BD).mul(1/tau_list[si])
-                if use_minus_cfg:
-                    logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
-                else:
-                    logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
+                # if use_minus_cfg:
+                #     logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
+                # else:
+                #     logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
+                logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
             else:
                 logits_BlV = self.get_logits(last_stage[:B], cond_BD[:B]).mul(1/tau_list[si])
             
