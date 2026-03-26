@@ -558,9 +558,9 @@ class Infinity(nn.Module):
         last_stage = (
             sos.unsqueeze(1).expand(bs, 1, -1)
             + self.pos_start.expand(bs, 1, -1)
-            + cfg_uncond_sos.unsqueeze(1)
+            # + cfg_uncond_sos.unsqueeze(1)
         )
-        last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
+        # last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
 
         with torch.amp.autocast('cuda', enabled=False):
             cond_BD_or_gss = self.shared_ada_lin(cond_BD.float()).float().contiguous()
