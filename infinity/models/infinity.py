@@ -558,7 +558,7 @@ class Infinity(nn.Module):
         last_stage = (
             sos.unsqueeze(1).expand(bs, 1, -1)
             + self.pos_start.expand(bs, 1, -1)
-            # + cfg_uncond_sos.unsqueeze(1)
+            + cfg_uncond_sos.unsqueeze(1)
         )
         last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
 
