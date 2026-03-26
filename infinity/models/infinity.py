@@ -560,7 +560,7 @@ class Infinity(nn.Module):
             + self.pos_start.expand(bs, 1, -1)
             # + cfg_uncond_sos.unsqueeze(1)
         )
-        # last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
+        last_stage = last_stage - sos.unsqueeze(1).expand(bs, 1, -1)
 
         with torch.amp.autocast('cuda', enabled=False):
             cond_BD_or_gss = self.shared_ada_lin(cond_BD.float()).float().contiguous()
@@ -631,11 +631,11 @@ class Infinity(nn.Module):
             if (cfg != 1) and add_cfg_on_logits:
                 # print(f'add cfg on add_cfg_on_logits')
                 logits_BlV = self.get_logits(last_stage, cond_BD).mul(1/tau_list[si])
-                # if use_minus_cfg:
-                #     logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
-                # else:
-                #     logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
-                logits_BlV = (1-cfg) * logits_BlV[B:]
+                if use_minus_cfg:
+                    logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
+                else:
+                    logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
+                # logits_BlV = (1-cfg) * logits_BlV[B:]
             else:
                 logits_BlV = self.get_logits(last_stage[:B], cond_BD[:B]).mul(1/tau_list[si])
             
