@@ -634,7 +634,7 @@ class Infinity(nn.Module):
                 print(f'add cfg on add_cfg_on_logits {num_logit_cfg} times')
                 logits_BlV = self.get_logits(last_stage, cond_BD).mul(1/tau_list[si])
                 if use_minus_cfg:
-                    logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
+                    logits_BlV = (1-cfg) * logits_BlV[B:]
                 else:
                     logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
                 # logits_BlV = (1-cfg) * logits_BlV[B:]
