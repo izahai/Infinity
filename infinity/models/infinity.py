@@ -593,12 +593,11 @@ class Infinity(nn.Module):
         num_stages_minus_1 = len(scale_schedule)-1
         print(f"Number Stages: {num_stages_minus_1}")
         summed_codes = 0
-        num_logit_cfg = 0
         for si, pn in enumerate(scale_schedule):   # si: i-th segment
             cfg = cfg_list[si]
             if si >= trunk_scale:
                 break
-            use_minus_cfg = (si >= max(0, len(scale_schedule) - inverse_step))
+            use_minus_cfg = (si < inverse_step)
             cur_L += np.array(pn).prod()
 
             need_to_pad = 0
@@ -623,18 +622,17 @@ class Infinity(nn.Module):
                     if (cfg != 1) and (layer_idx in abs_cfg_insertion_layers):
                         #print(f'add cfg={cfg} on {layer_idx}-th layer output')
                         if use_minus_cfg:
-                            last_stage = cfg * last_stage[:B] - (1-cfg) * last_stage[B:]
+                            last_stage = 0.1 * inverse_step * cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
                         else:
                             last_stage = cfg * last_stage[:B] + (1-cfg) * last_stage[B:]
                         last_stage = torch.cat((last_stage, last_stage), 0)
                     layer_idx += 1
             
             if (cfg != 1) and add_cfg_on_logits:
-                num_logit_cfg += 1
-                print(f'add cfg on add_cfg_on_logits {num_logit_cfg} times')
+                # print(f'add cfg on add_cfg_on_logits {num_logit_cfg} times')
                 logits_BlV = self.get_logits(last_stage, cond_BD).mul(1/tau_list[si])
                 if use_minus_cfg:
-                    logits_BlV = (1-cfg) * logits_BlV[B:]
+                    logits_BlV = cfg * logits_BlV[:B] - (1-cfg) * logits_BlV[B:]
                 else:
                     logits_BlV = cfg * logits_BlV[:B] + (1-cfg) * logits_BlV[B:]
                 # logits_BlV = (1-cfg) * logits_BlV[B:]
